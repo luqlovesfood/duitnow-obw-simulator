@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Checkout | Shopee Style</title>
+    <style>
+        :root {
+            --shopee-orange: #ee4d2d;
+            --shopee-bg: #f5f5f5;
+            --text-dark: #222222;
+            --text-muted: #757575;
+            --border-color: #efefef;
+            --disabled-grey: #cccccc;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        body {
+            background-color: var(--shopee-bg);
+            color: var(--text-dark);
+            padding-bottom: 60px;
+        }
+
+        /* Header Style */
+        header {
+            background-color: #fff;
+            border-bottom: 1px solid rgba(0,0,0,.09);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        .header-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            display: flex;
+            align-items: center;
+        }
+        .logo {
+            font-size: 24px;
+            font-weight: bold;
+            color: var(--shopee-orange);
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .header-title {
+            font-size: 20px;
+            color: var(--text-dark);
+            border-left: 1px solid var(--shopee-orange);
+            padding-left: 15px;
+            margin-left: 15px;
+        }
+
+        main {
+            max-width: 1200px;
+            margin: 20px auto;
+            padding: 0 20px;
+        }
+
+        /* Section Block Utility */
+        .section-card {
+            background-color: #fff;
+            padding: 24px;
+            margin-bottom: 12px;
+            border-radius: 3px;
+            box-shadow: 0 1px 1px rgba(0,0,0,.05);
+        }
+
+        .section-title {
+            font-size: 18px;
+            font-weight: 500;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .section-title svg {
+            color: var(--shopee-orange);
+            fill: currentColor;
+        }
+
+        /* Shipping Address Card Styling */
+        .address-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        .address-identity {
+            font-weight: bold;
+            font-size: 15px;
+            margin-right: 15px;
+        }
+        .address-detail {
+            color: var(--text-muted);
+            font-size: 14px;
+            margin-top: 5px;
+        }
+        .badge-default {
+            color: var(--shopee-orange);
+            border: 1px solid var(--shopee-orange);
+            font-size: 11px;
+            padding: 1px 4px;
+            border-radius: 2px;
+            margin-left: 10px;
+        }
+
+        /* Products Table Structure */
+        .product-table-header {
+            display: grid;
+            grid-template-columns: 4fr 1fr 1fr 1fr;
+            color: var(--text-muted);
+            font-size: 14px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid var(--border-color);
+            margin-bottom: 15px;
+        }
+        .product-row {
+            display: grid;
+            grid-template-columns: 4fr 1fr 1fr 1fr;
+            align-items: center;
+            padding: 15px 0;
+            border-bottom: 1px solid var(--border-color);
+            font-size: 14px;
+        }
+        .product-info-cell {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+        }
+        .product-img {
+            width: 80px;
+            height: 80px;
+            object-fit: cover;
+            border: 1px solid var(--border-color);
+        }
+        .product-name {
+            font-weight: 400;
+            line-height: 1.4;
+        }
+
+        /* Payment Options Box area */
+        .payment-options {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .payment-method-row {
+            border: 1px solid #e8e8e8;
+            border-radius: 2px;
+            padding: 16px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .payment-method-row:hover {
+            border-color: var(--shopee-orange);
+            background-color: #fffcfb;
+        }
+        .payment-method-row.active {
+            border-color: var(--shopee-orange);
+            background-color: #fffcfb;
+        }
+
+        .radio-label {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            width: 100%;
+        }
+        .radio-label input[type="radio"] {
+            accent-color: var(--shopee-orange);
+            width: 18px;
+            height: 18px;
+        }
+
+        .method-icon {
+            width: 40px;
+            height: auto;
+            object-fit: contain;
+        }
+
+        .sub-panel {
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px dashed var(--border-color);
+            padding-left: 30px;
+        }
+
+        .banking-type-group {
+            display: flex;
+            gap: 24px;
+            margin-bottom: 16px;
+        }
+
+        .bank-select-field {
+            display: block;
+            width: 100%;
+            max-width: 400px;
+            padding: 10px 12px;
+            font-size: 14px;
+            border: 1px solid #dfdfdf;
+            border-radius: 2px;
+            background-color: #fff;
+            outline: none;
+        }
+        .bank-select-field:focus {
+            border-color: var(--text-dark);
+        }
+
+        /* Order Checkout summary blocks */
+        .checkout-summary {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 15px;
+            border-top: 1px solid var(--border-color);
+            padding-top: 20px;
+        }
+        .total-row {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            font-size: 14px;
+            color: var(--text-muted);
+        }
+        .total-amount {
+            font-size: 28px;
+            font-weight: bold;
+            color: var(--shopee-orange);
+        }
+
+        .place-order-btn {
+            background-color: var(--shopee-orange);
+            color: white;
+            border: none;
+            padding: 12px 48px;
+            font-size: 16px;
+            font-weight: 500;
+            border-radius: 2px;
+            cursor: pointer;
+            box-shadow: 0 1px 2px rgba(0,0,0,.19);
+        }
+        .place-order-btn:disabled {
+            background-color: var(--disabled-grey);
+            cursor: not-allowed;
+            box-shadow: none;
+        }
+
+        /* Success alerts notification layer */
+        .toast {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(0, 0, 0, 0.85);
+            color: white;
+            padding: 14px 28px;
+            border-radius: 4px;
+            font-size: 15px;
+            z-index: 1000;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+            display: none;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="header-container">
+            <a href="#" class="logo">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"></path><line x1="3" y1="6" x2="21" y2="6"></line><path d="M16 10a4 4 0 0 1-8 0"></path></svg>
+                Shopee
+            </a>
+            <div class="header-title">Checkout</div>
+        </div>
+    </header>
+
+    <main>
+        <div class="section-card">
+            <div class="address-header">
+                <div class="section-title" style="margin-bottom:0; color: var(--shopee-orange);">
+                    <svg width="18" height="18" viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
+                    Delivery Address
+                </div>
+            </div>
+            <div>
+                <span class="address-identity">Luqman Hakim (+60 12-345 6789)</span>
+                <div class="address-detail">
+                    MUFG Bank Malaysia, Level 5, Menara IMC, 8 Jalan Sultan Ismail, 50250 Kuala Lumpur, Wilayah Persekutuan Kuala Lumpur <span class="badge-default">Office</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="section-card">
+            <div class="product-table-header">
+                <div>Products Ordered</div>
+                <div>Unit Price</div>
+                <div>Amount</div>
+                <div style="text-align: right;">Item Subtotal</div>
+            </div>
+
+            <div class="product-row">
+                <div class="product-info-cell">
+                    <img src="https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=200" class="product-img" alt="Product Image">
+                    <div class="product-name">Garmin Forerunner Running Watch (Black Edition) - Premium Marathon Wearable Tech Hardware</div>
+                </div>
+                <div>RM 150.00</div>
+                <div>1</div>
+                <div style="text-align: right; font-weight: 500;">RM 150.00</div>
+            </div>
+        </div>
+
+        <div class="section-card">
+            <div class="section-title">
+                <svg width="18" height="18" viewBox="0 0 24 24"><path d="M21 18v1c0 1.1-.9 2-2 2H5c-1.11 0-2-.9-2-2V5c0-1.1.89-2 2-2h14c1.1 0 2 .9 2 2v1h-9c-1.11 0-2 .9-2 2v8c0 1.1.89 2 2 2h9zm-9-2h10V8H12v8zm4-2.5c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/></svg>
+                Payment Method
+            </div>
+
+            <div class="payment-options">
+                <div class="payment-method-row active">
+                    <label class="radio-label">
+                        <input type="radio" name="payment-method" id="method-obw" checked>
+                        <img src="https://www.duitnow.my/Online-Banking-Wallet/images/DuitNow-Online-Banking-Wallet-Logo.png" class="method-icon" alt="DuitNow OBW">
+                        DuitNow Online Banking/Wallet
+                    </label>
+
+                    <div class="sub-panel" id="obw-sub-panel">
+                        <div class="banking-type-group">
+                            <label class="radio-label" style="width: auto;">
+                                <input type="radio" name="internet-banking" id="banking-personal" value="Personal" onchange="handleBankingTypeChange()">
+                                Personal Banking (Retail)
+                            </label>
+                            <label class="radio-label" style="width: auto;">
+                                <input type="radio" name="internet-banking" id="banking-corporate" value="Corporate" onchange="handleBankingTypeChange()">
+                                Corporate Banking
+                            </label>
+                        </div>
+
+                        <div id="bank-field-container" style="display: none;">
+                            <select id="bank-select" class="bank-select-field" onchange="validateFormState()">
+                                <option value="" disabled selected>-- Loading Banks... --</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="section-card checkout-summary">
+            <div class="total-row">
+                <div>Total Payment:</div>
+                <div class="total-amount">RM 150.00</div>
+            </div>
+            <button id="place-order-btn" class="place-order-btn" disabled onclick="placeOrder()">Place Order</button>
+        </div>
+    </main>
+
+    <div id="success-toast" class="toast"></div>
+
+    <script>
+        const API_URL = "/api/banks"; 
+        
+        let serverBankData = { personal: [], corporate: [] };
+        let isApiLoaded = false;
+
+        // Fetch live sorted payload records from flask runtime engine
+        window.addEventListener('DOMContentLoaded', () => {
+            fetch(API_URL)
+                .then(response => {
+                    if (!response.ok) throw new Error("Network issues encountered.");
+                    return response.json();
+                })
+                .then(res => {
+                    if (res.status === "success" && res.data) {
+                        serverBankData = res.data;
+                        isApiLoaded = true;
+                        
+                        const isPersonalChecked = document.getElementById('banking-personal').checked;
+                        const isCorporateChecked = document.getElementById('banking-corporate').checked;
+                        if (isPersonalChecked || isCorporateChecked) {
+                            handleBankingTypeChange();
+                        }
+                    }
+                })
+                .catch(err => {
+                    console.error("Failed fetching live bank sets:", err);
+                });
+        });
+
+        // Split routing records and dynamically present selection metric counts
+        function handleBankingTypeChange() {
+            const container = document.getElementById('bank-field-container');
+            const bankSelect = document.getElementById('bank-select');
+            
+            const isPersonalChecked = document.getElementById('banking-personal').checked;
+            const isCorporateChecked = document.getElementById('banking-corporate').checked;
+
+            if (!isPersonalChecked && !isCorporateChecked) return;
+
+            container.style.display = 'block';
+
+            if (!isApiLoaded) {
+                bankSelect.innerHTML = '<option value="" disabled selected>-- Loading Banks... --</option>';
+                validateFormState();
+                return;
+            }
+
+            const targetBanks = isPersonalChecked ? serverBankData.personal : serverBankData.corporate;
+            const totalCount = targetBanks.length;
+
+            // Injects dynamic total count right inside the dropdown placeholder description
+            bankSelect.innerHTML = `<option value="" disabled selected>-- Choose a Bank (${totalCount} banks available) --</option>`;
+
+            if (totalCount === 0) {
+                bankSelect.innerHTML = '<option value="" disabled selected>-- No Banks Available for Type --</option>';
+            } else {
+                targetBanks.forEach(bank => {
+                    const option = document.createElement('option');
+                    option.value = bank.code;
+                    option.textContent = bank.name;
+                    bankSelect.appendChild(option);
+                });
+            }
+
+            validateFormState();
+        }
+
+        function validateFormState() {
+            const orderButton = document.getElementById('place-order-btn');
+            const isPersonalChecked = document.getElementById('banking-personal').checked;
+            const isCorporateChecked = document.getElementById('banking-corporate').checked;
+            
+            const bankSelect = document.getElementById('bank-select');
+            const isBankSelected = bankSelect.value !== "";
+
+            if ((isPersonalChecked || isCorporateChecked) && isBankSelected) {
+                orderButton.disabled = false;
+            } else {
+                orderButton.disabled = true;
+            }
+        }
+
+        function placeOrder() {
+            const selectedBanking = document.querySelector('input[name="internet-banking"]:checked').value;
+            const bankSelect = document.getElementById('bank-select');
+            const selectedBankName = bankSelect.options[bankSelect.selectedIndex].text;
+            
+            const toast = document.getElementById('success-toast');
+            toast.innerText = `Success! Order placed via ${selectedBankName} (${selectedBanking})`;
+            toast.style.display = 'block';
+            
+            setTimeout(() => { 
+                toast.style.display = 'none'; 
+            }, 4000);
+        }
+    </script>
+</body>
+</html>

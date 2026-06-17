@@ -4,6 +4,7 @@ import logging
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo  # Python 3.9+ native timezone handling
 from flask import Flask, render_template, request, jsonify
+from flask_sqlalchemy import SQLAlchemy
 from apscheduler.schedulers.background import BackgroundScheduler
 import requests
 from cryptography.hazmat.primitives import hashes, serialization
@@ -16,7 +17,46 @@ app.secret_key = 'your_secret_key_here'
 MY_TZ = ZoneInfo("Asia/Kuala_Lumpur")
 
 # ==========================================
-# 1. ENCRYPTION & KEY CONFIGURATION
+# 1. DATABASE CONFIGURATION
+# ==========================================
+# Render automatically provides DATABASE_URL in production environments.
+# Falls back to a local SQLite instance for easy local debugging.
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///obw_simulator.db')
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+db = SQLAlchemy(app)
+
+
+# ==========================================
+# 2. DATABASE MODELS
+# ==========================================
+class BankList(db.Model):
+    __tablename__ = 'bank_list'
+    id = db.Column(db.Integer, primary_key=True)
+    bank_code = db.Column(db.String(20), unique=True, nullable=False)
+    bank_name = db.Column(db.String(100), nullable=False)
+    banking_type = db.Column(db.String(15), nullable=False) # 'personal', 'corporate', 'both'
+    last_updated = db.Column(db.DateTime, nullable=False)
+
+class AuditLog(db.Model):
+    __tablename__ = 'audit_logs'
+    id = db.Column(db.Integer, primary_key=True)
+    timestamp = db.Column(db.DateTime, nullable=False)
+    ip_address = db.Column(db.String(45), nullable=False)
+    endpoint = db.Column(db.String(255), nullable=False)
+    method = db.Column(db.String(10), nullable=False)
+    user_agent = db.Column(db.Text, nullable=False)
+
+class PayNetApiLog(db.Model):
+    __tablename__ = 'paynet_api_logs'
+    id = db.Column(db.Integer, primary_key=True)
+    timestamp = db.Column(db.DateTime, nullable=False)
+    endpoint = db.Column(db.String(255), nullable=False)
+    status_code = db.Column(db.Integer, nullable=False)
+    response_body = db.Column(db.Text, nullable=False)  # Stores every raw response body string
+
+
+# ==========================================
+# 3. ENCRYPTION & KEY CONFIGURATION
 # ==========================================
 PRIVATE_KEY_PEM = b"""-----BEGIN PRIVATE KEY-----
 MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDZs3E7WrYyeOTv
@@ -65,20 +105,8 @@ def generate_signature(message_id: str, transaction_id: str) -> str:
 
 
 # ==========================================
-# 2. STATE & DEDICATED LOGGING SETUP
+# 4. STATE ENGINE CORE
 # ==========================================
-log_date_str = datetime.now(MY_TZ).strftime("%d%m%Y")
-log_filename = f"api_payloads_{log_date_str}.log"
-
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s [%(levelname)s]\n%(message)s\n' + '='*50 + '\n',
-    handlers=[
-        logging.FileHandler(log_filename, encoding='utf-8'),
-        logging.StreamHandler()
-    ]
-)
-
 access_token_data = {
     "token": None,
     "expires_in": None,
@@ -90,16 +118,6 @@ sequence_counter = {
     "date": datetime.now(MY_TZ).date()
 }
 
-# Cache mapped cleanly to target structural categories
-cached_bank_list = {
-    "personal": [],
-    "corporate": []
-}
-
-
-# ==========================================
-# 3. HELPER FUNCTIONS
-# ==========================================
 def get_sequence_number():
     today = datetime.now(MY_TZ).date()
     if sequence_counter["date"] != today:
@@ -117,7 +135,7 @@ def is_token_expired():
 
 
 # ==========================================
-# 4. API CALLS WITH CLEAN CACHE SORTING
+# 5. PAYNET INTERACTION & RECURSIVE DB SYNC
 # ==========================================
 def fetch_token():
     url = "https://sandbox.api.paynet.my/auth/token"
@@ -134,31 +152,30 @@ def fetch_token():
     try:
         response = requests.post(url, headers=headers, data=data)
         
-        log_msg = (
-            f"🌐 [API REQUEST] -> POST Token\n"
-            f"URL: {url}\n"
-            f"Headers: {headers}\n"
-            f"Body Data: {data}\n\n"
-            f"📥 [API RESPONSE]\n"
-            f"Status Code: {response.status_code}\n"
-            f"Body Content: {response.text}"
-        )
-        logging.info(log_msg)
+        # Log the raw response parameters to DB
+        with app.app_context():
+            token_log = PayNetApiLog(
+                timestamp=datetime.now(MY_TZ),
+                endpoint=url,
+                status_code=response.status_code,
+                response_body=response.text
+            )
+            db.session.add(token_log)
+            db.session.commit()
 
         if response.status_code == 200:
             response_data = response.json()
             access_token_data["token"] = response_data.get("access_token")
             access_token_data["expires_in"] = response_data.get("expires_in")
             access_token_data["timestamp"] = datetime.now(MY_TZ)
-
-            timestamp_str = access_token_data["timestamp"].strftime("%d%m%Y%H%M%S")
-            filename = f"token_{timestamp_str}.txt"
-            with open(filename, "w") as f:
-                f.write(access_token_data["token"])
     except Exception as e:
-        logging.error(f"❌ Exception in fetch_token: {str(e)}")
+        print(f"❌ Exception in fetch_token: {str(e)}")
 
-def fetch_bank_list(page_key=None):
+def sync_banks_to_db(page_key=None, accumulated_banks=None):
+    """Fetches paginated banks, logs every raw response body, and commits to Database."""
+    if accumulated_banks is None:
+        accumulated_banks = []
+
     if is_token_expired():
         fetch_token()
 
@@ -177,7 +194,7 @@ def fetch_bank_list(page_key=None):
     try:
         signature = generate_signature(message_id, business_msg_id)
     except Exception as e:
-        logging.error(f"❌ Signature generation error: {str(e)}")
+        print(f"❌ Signature generation error: {str(e)}")
         return
 
     headers = {
@@ -202,73 +219,103 @@ def fetch_bank_list(page_key=None):
     try:
         response = requests.get(url, headers=headers, params=params)
         
-        log_msg = (
-            f"🌐 [API REQUEST] -> GET Bank List\n"
-            f"URL: {url}\n"
-            f"Headers: {headers}\n"
-            f"Params: {params}\n\n"
-            f"📥 [API RESPONSE]\n"
-            f"Status Code: {response.status_code}\n"
-            f"Body Content: {response.text}"
-        )
-        logging.info(log_msg)
+        # --- REQUIREMENT: LOG EVERY RESPONSE BODY FROM PAYNET TO DB ---
+        with app.app_context():
+            api_log = PayNetApiLog(
+                timestamp=datetime.now(MY_TZ),
+                endpoint=url if not page_key else f"{url}?pageKey={page_key}",
+                status_code=response.status_code,
+                response_body=response.text  # Capture raw text body completely
+            )
+            db.session.add(api_log)
+            db.session.commit()
 
         if response.status_code == 200:
-            try:
-                data = response.json()
-                raw_banks = data.get("banks", []) or data.get("bankList", []) or []
+            data = response.json()
+            raw_banks = data.get("banks", []) or data.get("bankList", []) or []
+
+            for bank in raw_banks:
+                code = bank.get("code") or bank.get("bankId") or bank.get("bic")
+                name = bank.get("name") or bank.get("bankName")
                 
-                # Wipe cache container fresh only on initial call setup
-                if not page_key:
-                    cached_bank_list["personal"] = []
-                    cached_bank_list["corporate"] = []
+                redirect_urls = bank.get("redirectUrls", [])
+                is_p = False
+                is_c = False
+                
+                for route in redirect_urls:
+                    route_type = str(route.get("type", "")).strip().lower()
+                    if route_type == "ret":
+                        is_p = True
+                    elif route_type == "cor":
+                        is_c = True
 
-                for bank in raw_banks:
-                    bank_item = {
-                        "code": bank.get("code") or bank.get("bankId") or bank.get("bic"),
-                        "name": bank.get("name") or bank.get("bankName")
-                    }
-                    
-                    redirect_urls = bank.get("redirectUrls", [])
-                    is_personal = False
-                    is_corporate = False
-                    
-                    # Core assignment rules checking redirect items explicit types
-                    for route in redirect_urls:
-                        route_type = str(route.get("type", "")).strip().lower()
-                        if route_type == "ret":
-                            is_personal = True
-                        elif route_type == "cor":
-                            is_corporate = True
-
-                    if is_personal:
-                        cached_bank_list["personal"].append(bank_item)
-                    if is_corporate:
-                        cached_bank_list["corporate"].append(bank_item)
-                        
-                    # Fallback policy mapping rules
-                    if not is_personal and not is_corporate:
-                        cached_bank_list["personal"].append(bank_item)
-                        cached_bank_list["corporate"].append(bank_item)
-
-                # Control programmatic pagination iteration loops
-                next_page_key = data.get("pageKey")
-                if next_page_key:
-                    fetch_bank_list(page_key=next_page_key)
+                # Determine standard structure categorization mappings
+                if is_p and is_c:
+                    b_type = 'both'
+                elif not is_p and not is_c:
+                    b_type = 'both'
                 else:
-                    # Sort completely alphabetically from A-Z once all pagination arrays are complete
-                    cached_bank_list["personal"] = sorted(cached_bank_list["personal"], key=lambda x: x["name"].lower())
-                    cached_bank_list["corporate"] = sorted(cached_bank_list["corporate"], key=lambda x: x["name"].lower())
-                    logging.info(f"✅ Bank lists sorted A-Z. Personal: {len(cached_bank_list['personal'])}, Corporate: {len(cached_bank_list['corporate'])}")
+                    b_type = 'personal' if is_p else 'corporate'
 
-            except ValueError:
-                logging.error("❌ Response body is not valid JSON parsing structure.")
+                accumulated_banks.append({
+                    "code": code,
+                    "name": name,
+                    "type": b_type
+                })
+
+            # Check for continuation page structures
+            next_page_key = data.get("pageKey")
+            if next_page_key:
+                sync_banks_to_db(page_key=next_page_key, accumulated_banks=accumulated_banks)
+            else:
+                # All paginated data collected -> Commit batch records to DB
+                with app.app_context():
+                    current_time = datetime.now(MY_TZ)
+                    for item in accumulated_banks:
+                        existing_bank = BankList.query.filter_by(bank_code=item["code"]).first()
+                        if existing_bank:
+                            existing_bank.bank_name = item["name"]
+                            existing_bank.banking_type = item["type"]
+                            existing_bank.last_updated = current_time
+                        else:
+                            new_bank = BankList(
+                                bank_code=item["code"],
+                                bank_name=item["name"],
+                                banking_type=item["type"],
+                                last_updated=current_time
+                            )
+                            db.session.add(new_bank)
+                    db.session.commit()
+                print(f"✅ DB Synchronization Complete. Processed records: {len(accumulated_banks)}")
     except Exception as e:
-        logging.error(f"❌ Exception in fetch_bank_list: {str(e)}")
+        print(f"❌ Exception in sync_banks_to_db: {str(e)}")
 
 
 # ==========================================
-# 5. FLASK WEB ROUTES & SCHEDULER
+# 6. GLOBAL VISITORS AUDIT LOG INTERCEPTOR
+# ==========================================
+@app.before_request
+def log_visitor_access():
+    """Fires automatically before every route execution to log active access metadata."""
+    if request.path.startswith('/static'):
+        return
+
+    try:
+        new_log = AuditLog(
+            timestamp=datetime.now(MY_TZ),
+            ip_address=request.headers.get('X-Forwarded-For', request.remote_addr),
+            endpoint=request.path,
+            method=request.method,
+            user_agent=request.user_agent.string
+        )
+        db.session.add(new_log)
+        db.session.commit()
+    except Exception as e:
+        print(f"❌ Failed to write visitor audit log trail: {str(e)}")
+
+
+# ==========================================
+# 7. FLASK WEB ROUTES
 # ==========================================
 @app.route('/')
 def home():
@@ -276,21 +323,38 @@ def home():
 
 @app.route('/api/banks')
 def get_banks():
-    # If cache is dry, force an emergency fetch run
-    if not cached_bank_list["personal"] and not cached_bank_list["corporate"]:
-        fetch_bank_list()
+    """Reads transactional list direct from the local cached database rows."""
+    try:
+        all_banks = BankList.query.all()
         
-    # Standard health validation checks
-    if not cached_bank_list["personal"] and not cached_bank_list["corporate"]:
+        # Emergency backup seed mechanism if the listing table is empty
+        if not all_banks:
+            sync_banks_to_db()
+            all_banks = BankList.query.all()
+
+        personal_list = []
+        corporate_list = []
+
+        for b in all_banks:
+            item = {"code": b.bank_code, "name": b.bank_name}
+            if b.banking_type in ['personal', 'both']:
+                personal_list.append(item)
+            if b.banking_type in ['corporate', 'both']:
+                corporate_list.append(item)
+
+        # Alphabetical sorting
+        personal_list = sorted(personal_list, key=lambda x: x["name"].lower())
+        corporate_list = sorted(corporate_list, key=lambda x: x["name"].lower())
+        
         return jsonify({
-            "status": "error",
-            "message": "Bank cache list is dry. Verify system logging payloads for endpoint authorization errors."
-        }), 500
-        
-    return jsonify({
-        "status": "success",
-        "data": cached_bank_list
-    })
+            "status": "success",
+            "data": {
+                "personal": personal_list,
+                "corporate": corporate_list
+            }
+        })
+    except Exception as e:
+        return jsonify({"status": "error", "message": f"Database processing failure: {str(e)}"}), 500
 
 @app.route('/use-token')
 def use_token():
@@ -303,15 +367,27 @@ def use_token():
 
     return f"Token is ready: {token}"
 
-def start_scheduler():
+
+# ==========================================
+# 8. PROCESS INITIALIZER & SCHEDULER BLOCK
+# ==========================================
+def initialize_engine():
+    with app.app_context():
+        db.create_all()  # Generates Postgres/SQLite table definitions automatically
+    
     scheduler = BackgroundScheduler()
+    # Task 1: Fetch client credentials token at midnight every day
     scheduler.add_job(fetch_token, 'cron', hour=0, minute=0, timezone=MY_TZ)
-    scheduler.add_job(fetch_bank_list, 'interval', hours=1)
+    # Task 2: Sync bank lists & log raw responses every single night at 23:00 (11:00 PM) Malaysia Time
+    scheduler.add_job(sync_banks_to_db, 'cron', hour=23, minute=0, timezone=MY_TZ)
     scheduler.start()
 
 if __name__ == "__main__":
-    start_scheduler()
+    initialize_engine()
+    
+    # Run initial emergency startup checks to seed base application data
     fetch_token()
-    fetch_bank_list()
+    sync_banks_to_db()
+    
     port = int(os.environ.get("PORT", 5001))
     app.run(host="0.0.0.0", port=port, debug=False)

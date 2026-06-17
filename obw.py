@@ -56,6 +56,17 @@ class PayNetApiLog(db.Model):
 
 
 # ==========================================
+# EXTRA CRITICAL FIX: FORCE GUNICORN CONTEXT TABLE GENERATION
+# ==========================================
+with app.app_context():
+    try:
+        db.create_all()
+        print("✅ Production Database tables verified/created successfully.")
+    except Exception as e:
+        print(f"❌ Database table pre-creation error: {str(e)}")
+
+
+# ==========================================
 # 3. ENCRYPTION & KEY CONFIGURATION
 # ==========================================
 PRIVATE_KEY_PEM = b"""-----BEGIN PRIVATE KEY-----
@@ -303,7 +314,7 @@ def log_visitor_access():
     try:
         new_log = AuditLog(
             timestamp=datetime.now(MY_TZ),
-            ip_address=request.headers.get('X-Forwarded-For', request.remote_addr),
+            ip_address=request.headers.get('X-Forwarded-For', request.remote_addr).split(',')[0].strip(),
             endpoint=request.path,
             method=request.method,
             user_agent=request.user_agent.string
@@ -369,12 +380,44 @@ def use_token():
 
 
 # ==========================================
+# NEW ADMIN WEB DASHBOARD ENDPOINT
+# ==========================================
+@app.route('/secret-admin-dashboard')
+def admin_dashboard():
+    """Builds a basic web table layout layout for direct visual inspection of live cloud entries."""
+    try:
+        visitors = AuditLog.query.order_by(AuditLog.timestamp.desc()).limit(50).all()
+        api_payloads = PayNetApiLog.query.order_by(PayNetApiLog.timestamp.desc()).limit(50).all()
+        banks = BankList.query.order_by(BankList.bank_name.asc()).all()
+        
+        html = "<h1>🖥️ System Database Admin Dashboard</h1>"
+        
+        html += "<h2>1. Active Cached Banks List</h2><table border='1'><tr><th>Bank Name</th><th>Bank Code</th><th>Type</th></tr>"
+        for b in banks:
+            html += f"<tr><td>{b.bank_name}</td><td>{b.bank_code}</td><td>{b.banking_type}</td></tr>"
+        html += "</table>"
+        
+        html += "<h2>2. Recent Visitor Audit Logs (Last 50)</h2><table border='1'><tr><th>Timestamp</th><th>IP Address</th><th>Endpoint</th><th>Method</th></tr>"
+        for v in visitors:
+            html += f"<tr><td>{v.timestamp}</td><td>{v.ip_address}</td><td>{v.endpoint}</td><td>{v.method}</td></tr>"
+        html += "</table>"
+        
+        html += "<h2>3. Raw PayNet API Response Payload Logs (Last 50)</h2><table border='1'><tr><th>Timestamp</th><th>Status</th><th>Raw Response Body</th></tr>"
+        for p in api_payloads:
+            truncated_body = p.response_body[:200] + "..." if len(p.response_body) > 200 else p.response_body
+            html += f"<tr><td>{p.timestamp}</td><td>{p.status_code}</td><td><code>{truncated_body}</code></td></tr>"
+        html += "</table>"
+        
+        return html
+    except Exception as e:
+        return f"Database Panel Visibility Error: {str(e)}", 500
+
+
+# ==========================================
 # 8. PROCESS INITIALIZER & SCHEDULER BLOCK
 # ==========================================
 def initialize_engine():
-    with app.app_context():
-        db.create_all()  # Generates Postgres/SQLite table definitions automatically
-    
+    # Context forced at the module root to guarantee schemas exist for Gunicorn.
     scheduler = BackgroundScheduler()
     # Task 1: Fetch client credentials token at midnight every day
     scheduler.add_job(fetch_token, 'cron', hour=0, minute=0, timezone=MY_TZ)
@@ -382,10 +425,11 @@ def initialize_engine():
     scheduler.add_job(sync_banks_to_db, 'cron', hour=23, minute=0, timezone=MY_TZ)
     scheduler.start()
 
+# Gunicorn triggers execution outside of main. Trigger background scheduler directly during import.
+initialize_engine()
+
 if __name__ == "__main__":
-    initialize_engine()
-    
-    # Run initial emergency startup checks to seed base application data
+    # Run initial startup checks to seed base application data if executed standalone
     fetch_token()
     sync_banks_to_db()
     

@@ -2,7 +2,8 @@ import os
 import base64
 import logging
 from datetime import datetime, timedelta
-from flask import Flask, render_template, request
+from zoneinfo import ZoneInfo  # Python 3.9+ native timezone handling
+from flask import Flask, render_template, request, jsonify
 from apscheduler.schedulers.background import BackgroundScheduler
 import requests
 from cryptography.hazmat.primitives import hashes, serialization
@@ -10,6 +11,9 @@ from cryptography.hazmat.primitives.asymmetric import padding
 
 app = Flask(__name__)
 app.secret_key = 'your_secret_key_here'
+
+# Target operational timezone for PayNet validation matching
+MY_TZ = ZoneInfo("Asia/Kuala_Lumpur")
 
 # ==========================================
 # 1. ENCRYPTION & KEY CONFIGURATION
@@ -63,7 +67,7 @@ def generate_signature(message_id: str, transaction_id: str) -> str:
 # ==========================================
 # 2. STATE & DEDICATED LOGGING SETUP
 # ==========================================
-log_date_str = datetime.now().strftime("%d%m%Y")
+log_date_str = datetime.now(MY_TZ).strftime("%d%m%Y")
 log_filename = f"api_payloads_{log_date_str}.log"
 
 logging.basicConfig(
@@ -83,7 +87,7 @@ access_token_data = {
 
 sequence_counter = {
     "value": 1,
-    "date": datetime.now().date()
+    "date": datetime.now(MY_TZ).date()
 }
 
 # Cache mapped cleanly to target structural categories
@@ -97,7 +101,7 @@ cached_bank_list = {
 # 3. HELPER FUNCTIONS
 # ==========================================
 def get_sequence_number():
-    today = datetime.now().date()
+    today = datetime.now(MY_TZ).date()
     if sequence_counter["date"] != today:
         sequence_counter["value"] = 1
         sequence_counter["date"] = today
@@ -109,7 +113,7 @@ def is_token_expired():
     if not access_token_data["token"] or not access_token_data["timestamp"]:
         return True
     expiry_time = access_token_data["timestamp"] + timedelta(seconds=access_token_data["expires_in"] - 60)
-    return datetime.now() >= expiry_time
+    return datetime.now(MY_TZ) >= expiry_time
 
 
 # ==========================================
@@ -145,7 +149,7 @@ def fetch_token():
             response_data = response.json()
             access_token_data["token"] = response_data.get("access_token")
             access_token_data["expires_in"] = response_data.get("expires_in")
-            access_token_data["timestamp"] = datetime.now()
+            access_token_data["timestamp"] = datetime.now(MY_TZ)
 
             timestamp_str = access_token_data["timestamp"].strftime("%d%m%Y%H%M%S")
             filename = f"token_{timestamp_str}.txt"
@@ -162,7 +166,7 @@ def fetch_bank_list(page_key=None):
     if not token:
         return
 
-    now = datetime.now()
+    now = datetime.now(MY_TZ)
     date_str = now.strftime("%Y%m%d")
     client_id = "M0043439"
     sequence_number = get_sequence_number()
@@ -272,12 +276,21 @@ def home():
 
 @app.route('/api/banks')
 def get_banks():
+    # If cache is dry, force an emergency fetch run
     if not cached_bank_list["personal"] and not cached_bank_list["corporate"]:
         fetch_bank_list()
-    return {
+        
+    # Standard health validation checks
+    if not cached_bank_list["personal"] and not cached_bank_list["corporate"]:
+        return jsonify({
+            "status": "error",
+            "message": "Bank cache list is dry. Verify system logging payloads for endpoint authorization errors."
+        }), 500
+        
+    return jsonify({
         "status": "success",
         "data": cached_bank_list
-    }
+    })
 
 @app.route('/use-token')
 def use_token():
@@ -292,7 +305,7 @@ def use_token():
 
 def start_scheduler():
     scheduler = BackgroundScheduler()
-    scheduler.add_job(fetch_token, 'cron', hour=0, minute=0)
+    scheduler.add_job(fetch_token, 'cron', hour=0, minute=0, timezone=MY_TZ)
     scheduler.add_job(fetch_bank_list, 'interval', hours=1)
     scheduler.start()
 

@@ -3,3 +3,5 @@ requests==2.31.0
 APScheduler==3.10.4
 cryptography==42.0.5
 gunicorn==21.2.0
+flask-sqlalchemy
+psycopg2-binary
